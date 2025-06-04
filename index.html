@@ -34,6 +34,7 @@
       border-left: 5px solid #4caf50;
     }
   </style>
+  <link rel="icon" href="data:,">
 </head>
 <body>
   <h1>유기문어(有機文語)</h1>
@@ -48,7 +49,6 @@
   <pre id="output"></pre>
 
 <script>
-
   const state = { 경민: 0, 한별: 0, 솔빈: 0, 츠카사: 0, 윤설: 0 };
   const isDead = name => ["한별", "솔빈"].includes(name);
   const isAlive = name => ["츠카사", "윤설"].includes(name);
@@ -85,15 +85,12 @@
     }
   }
 
-  
   function normalizeSubject(line) {
     return line
       .replace(/([가-힣]+)(은|는|이|가)/g, "$1이")
       .replace(/([가-힣]+)(을|를)/g, "$1을")
-      .replace(/루프을/g, "루프를")
       .replace(/루프을/g, "루프를");
   }
-
 
   function runYugimunu() {
     const code = document.getElementById("code").value;
@@ -133,11 +130,16 @@
         conditionStr = conditionStr.replace(/"([^"]+)"은\s+(\d+)\s*을\s*(이해했다|이해하지 못했다|크다고|작다고)/g,
           (_, left, right, op) => `(state["${left}"] ${compareOps[op]} ${right})`);
 
+        skipping = !evaluateCondition(conditionStr);
+        stack.push(skipping);
+        continue;
+      }
 
       if (line.includes("생각을 바꿨다")) {
         if (stack.length) skipping = stack[stack.length - 1];
         continue;
       }
+
       if (line.includes("생각을 그만뒀다")) {
         stack.pop();
         skipping = false;
@@ -148,12 +150,13 @@
         stack.push({ type: "loop", index: i });
         continue;
       }
+
       if (line.includes("루프를 종료했다")) {
         const loop = stack.pop();
         if (loop && loop.type === "loop") i = loop.index;
         continue;
       }
-      
+
       if (line.includes("루프를 건너뛰었다")) {
         let top = stack[stack.length - 1];
         if (top && top.type === "loop") {
@@ -215,13 +218,6 @@
         case "잊었다": state[objKey] = 0; break;
         case "말했다": output(`${objKey} = ${state[objKey]}`); break;
         case "들었다":
-          if (match[2].startsWith('"') && match[2].endsWith('"')) {
-            const strKey = match[2].slice(1, -1);
-            const strVal = prompt(`"${strKey}" 값을 입력하세요:`);
-            state[strKey] = parseInt(strVal) || 0;
-            inputVars[strKey] = state[strKey];
-            break;
-          }
           const val = prompt(`${objKey} 값을 입력하세요:`);
           state[objKey] = parseInt(val) || 0;
           inputVars[objKey] = state[objKey];
