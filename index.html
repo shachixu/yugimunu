@@ -1,0 +1,195 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>유기문어 인터프리터</title>
+  <style>
+    body { font-family: 'Courier New', monospace; background: #121212; color: #f0f0f0; padding: 20px; }
+    textarea { width: 100%; height: 200px; background: #1e1e1e; color: #f06292; padding: 10px; border: none; font-size: 16px; }
+    button { padding: 10px 20px; background: #f06292; color: white; border: none; cursor: pointer; margin-top: 10px; }
+    pre { background: #1e1e1e; padding: 10px; white-space: pre-wrap; word-wrap: break-word; }
+  </style>
+</head>
+<body>
+  <h2>🥀 유기문어 인터프리터</h2>
+  <p>※ 원작 소설: <a href="https://novelpia.com/novel/21232" target="_blank" style="color:#f06292;font-weight:bold;">『유기무녀』 보러가기</a></p>
+  <textarea id="code" placeholder="여기에 유기문어 코드를 입력하세요..."></textarea><br>
+  <button id="runButton">실행하기</button>
+  <pre id="output"></pre>
+
+  <script>
+    const state = { "경민": 0, "한별": 0, "솔빈": 0, "츠카사": 0, "윤설": 0 };
+    const isDead = name => ["한별", "솔빈"].includes(name);
+    const isAlive = name => ["츠카사", "윤설"].includes(name);
+    const enemies = { "한별": "솔빈", "솔빈": "한별", "츠카사": "윤설", "윤설": "츠카사" };
+    let outputBuffer = "";
+
+    function error(msg) { outputBuffer += `❗ ${msg}\n`; }
+    function output(msg) { outputBuffer += `\${msg}\n`; }
+
+    document.getElementById("runButton").addEventListener("click", () => {
+      const code = document.getElementById("code").value.trim().split(/\r?\n/);
+      let stack = [], skipping = false;
+      outputBuffer = "";
+
+      for (let i = 0; i < code.length; i++) {
+        let line = code[i].trim();
+        if (!line || line.startsWith("//")) continue;
+        line = normalizeSubject(line);
+
+        if (/(\S+)이\s+.+고\s+생각했다/.test(line)) {
+  const conditionPattern = /(\S+)이\s+(.+?)고\s+생각했다/;
+  const compareOps = {
+    "이해했다": "==",
+    "이해하지 못했다": "!=",
+    "크다고": ">",
+    "작다고": "<",
+    "크다": ">",
+    "작다": "<"
+  };
+
+  const [, subject, rawCond] = line.match(conditionPattern);
+  let lastVarMatch = rawCond.match(/"([^"]+)"은/);
+  let lastVar = lastVarMatch ? lastVarMatch[1] : null;
+
+  const logicSplit = rawCond.split(/(?:또한|또는)/);
+  const logicOps = [...rawCond.matchAll(/(?:또한|또는)/g)].map(m => m[0]);
+  let conditions = [];
+
+  for (let part of logicSplit) {
+    let expr = part.trim();
+    let handled = false;
+
+    let strMatch = expr.match(/"([^"]+)"은\s+"([^"]+)"을\s*(이해했다|이해하지 못했다)/);
+    if (strMatch) {
+      const [, left, right, op] = strMatch;
+      conditions.push(\`(state["${left}"] ${compareOps[op]} state["${right}"])\`);
+      lastVar = left;
+      handled = true;
+    }
+
+    let numMatch = expr.match(/"([^"]+)"은\s+(\d+)보다\s*(크다고|작다고|크다|작다)/);
+    if (!handled && numMatch) {
+      const [, left, num, op] = numMatch;
+      conditions.push(\`(state["${left}"] ${compareOps[op]} ${num})\`);
+      lastVar = left;
+      handled = true;
+    }
+
+    let shortMatch = expr.match(/(\d+)보다\s*(크다고|작다고|크다|작다)/);
+    if (!handled && shortMatch && lastVar) {
+      const [, num, op] = shortMatch;
+      conditions.push(\`(state["${lastVar}"] ${compareOps[op]} ${num})\`);
+      handled = true;
+    }
+
+    if (!handled) {
+      error(\`❗ 조건 평가 오류: '${expr}'\`);
+      stack.push(false);
+      skipping = true;
+      break;
+    }
+  }
+
+  let conditionStr = conditions[0];
+  for (let i = 1; i < conditions.length; i++) {
+    const logic = logicOps[i - 1] === "또한" ? "&&" : "||";
+    conditionStr += \` ${logic} ${conditions[i]}\`;
+  }
+
+  console.log("▶ rawCond:", rawCond);
+  console.log("▶ conditionStr:", conditionStr);
+
+  try {
+    const result = eval(conditionStr);
+    stack.push(result);
+    skipping = !result;
+  } catch (e) {
+    error(\`조건 평가 오류: ${conditionStr}\`);
+    stack.push(false);
+    skipping = true;
+  }
+}
+
+        if (skipping) {
+          if (line.endsWith("생각을 그만뒀다")) {
+            skipping = false;
+            stack.pop();
+          }
+          continue;
+        }
+
+        if (/은 말했다/.test(line)) {
+          const msg = line.match(/"(.+?)"을 말했다/);
+          if (msg) output(msg[1]);
+        }
+
+        if (/은 루프를 시작했다/.test(line)) {
+          const subject = line.match(/"?(\w+)"?\s*은 루프를 시작했다/)[1];
+          stack.push({ type: "loop", subject, index: i });
+        }
+
+        if (/은 루프를 종료했다/.test(line)) {
+          const loop = stack.pop();
+          if (loop?.type === "loop" && state[loop.subject] > 0) {
+            i = loop.index - 1;
+            state[loop.subject]--;
+          }
+        }
+
+        if (/은 생각을 바꿨다/.test(line)) {
+          skipping = !stack.pop();
+          stack.push(!skipping);
+        }
+
+        if (/은 생각을 그만뒀다/.test(line)) {
+          stack.pop();
+        }
+
+        if (/은 \d+을 사랑했다/.test(line)) {
+          const [who, num] = line.split("은 ");
+          if (!isDead(who)) state[who] += parseInt(num.match(/\d+/)[0]);
+        }
+
+        if (/은 \d+을 증오했다/.test(line)) {
+          const [who, num] = line.split("은 ");
+          if (!isAlive(who)) state[who] -= parseInt(num.match(/\d+/)[0]);
+        }
+
+        if (/은 \d+을 껴안았다/.test(line)) {
+          const [who, num] = line.split("은 ");
+          if (!isDead(who)) state[who] *= parseInt(num.match(/\d+/)[0]);
+        }
+
+        if (/은 \d+을 밀어냈다/.test(line)) {
+          const [who, num] = line.split("은 ");
+          if (!isAlive(who)) state[who] = Math.floor(state[who] / parseInt(num.match(/\d+/)[0]));
+        }
+
+        if (/은 잊었다/.test(line)) {
+          const who = line.match(/"?(\w+)"?\s*은 잊었다/)[1];
+          state[who] = 0;
+        }
+
+        if (/는 생각했다/.test(line)) {
+          const cond = line.match(/(.+는 .+고 생각했다)/);
+          if (cond) {
+            error("경민은 혼란에 빠졌다 — '" + cond[1] + "'은 알 수 없는 문장입니다.");
+          }
+        }
+      }
+
+      for (const key in state) {
+        output(`\${key} = \${state[key]}`);
+      }
+
+      document.getElementById("output").textContent = outputBuffer;
+    });
+
+    function normalizeSubject(line) {
+      return line.replace(/“|”/g, '"').replace(/‘|’/g, "'").replace(/“|”/g, '"');
+    }
+  </script>
+</body>
+</html>
