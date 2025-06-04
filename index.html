@@ -2,231 +2,161 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>유기문어(有機文語)</title>
+  <title>유기문어 실행기</title>
   <style>
-    body {
-      font-family: 'Pretendard', sans-serif;
-      background: #1e1e1e;
-      color: #ffffff;
-      padding: 2em;
-    }
-    textarea {
-      width: 100%;
-      height: 200px;
-      background: #2d2d2d;
-      color: white;
-      border: none;
-      padding: 1em;
-    }
-    button {
-      margin-top: 1em;
-      padding: 0.5em 1em;
-      font-size: 1em;
-      background: #4caf50;
-      color: white;
-      border: none;
-      cursor: pointer;
-    }
-    pre {
-      background: #121212;
-      padding: 1em;
-      white-space: pre-wrap;
-      border-left: 5px solid #4caf50;
-    }
+    body { background: #1e1e1e; color: white; padding: 2em; font-family: sans-serif; }
+    textarea { width: 100%; height: 200px; background: #2d2d2d; color: white; padding: 1em; border: none; }
+    button { margin-top: 1em; padding: 0.5em 1em; font-size: 1em; background: #4caf50; color: white; border: none; cursor: pointer; }
+    pre { background: #121212; padding: 1em; border-left: 5px solid #4caf50; white-space: pre-wrap; }
   </style>
-  <link rel="icon" href="data:,">
 </head>
 <body>
   <h1>유기문어(有機文語)</h1>
-  <textarea id="code" placeholder="여기에 유기문어 코드를 입력하세요."></textarea>
+  <textarea id="code"># 여기에 유기문어 코드를 입력하세요</textarea>
   <br />
   <button onclick="runYugimunu()">실행하기</button>
-  <p style="margin-top: 1em; font-size: 0.9em;">
-    프로그래밍 언어의 원작 소설이 궁금하다면?<br>
-    <a href="https://novelpia.com/novel/21232" target="_blank" style="color:#f06292; font-weight:bold;">『유기무녀』 보러가기</a>
-  </p>
-  <h2>실행 결과</h2>
   <pre id="output"></pre>
 
 <script>
+window.runYugimunu = function() {
   const state = { 경민: 0, 한별: 0, 솔빈: 0, 츠카사: 0, 윤설: 0 };
-  const isDead = name => ["한별", "솔빈"].includes(name);
-  const isAlive = name => ["츠카사", "윤설"].includes(name);
+  const isDead = n => ["한별", "솔빈"].includes(n);
+  const isAlive = n => ["츠카사", "윤설"].includes(n);
   const enemies = { 한별: "솔빈", 솔빈: "한별", 츠카사: "윤설", 윤설: "츠카사" };
-  let inputVars = {};
+  const outputBox = document.getElementById("output");
   let outputBuffer = "";
+  let i = 0, stack = [], skipping = false;
+  const code = document.getElementById("code").value.split(/\n|\r/);
 
   function error(msg) { outputBuffer += `❗ ${msg}\n`; }
   function output(msg) { outputBuffer += `${msg}\n`; }
 
-  function evaluateCondition(condition) {
-    const literals = {};
-    let litIndex = 0;
-    condition = condition.replace(/"([^"\n]+)"/g, (match, p1) => {
-      const key = `__lit${litIndex++}__`;
-      literals[key] = `"${p1}"`;
-      return key;
-    });
-    condition = condition.replace(/\b(경민|한별|솔빈|츠카사|윤설|[A-Za-z0-9_]+)\b/g, name => (state[name] ?? 0));
-    condition = condition.replace(/이해했다/g, "==")
-                         .replace(/이해하지 못했다/g, "!=")
-                         .replace(/크다/g, ">")
-                         .replace(/작다/g, "<")
-                         .replace(/또한/g, "&&")
-                         .replace(/또는/g, "||");
-    for (const key in literals) {
-      condition = condition.replace(new RegExp(key, 'g'), literals[key]);
+  while (i < code.length) {
+    let line = code[i++].trim();
+    if (!line || line.startsWith("#")) continue;
+    if (skipping && !line.includes("생각을 그만뒀다")) continue;
+
+    // 조건문
+    const ifMatch = line.match(/(\S+)이\s+\"?(\S+?)\"?은\s+\"?(\S+?)\"?을\s+(이해했다|이해하지 못했다|크다고|작다고)\s+생각했다/);
+    if (ifMatch) {
+      const [_, subject, left, right, op] = ifMatch;
+      const lval = isNaN(left) ? (state[left] ?? 0) : parseInt(left);
+      const rval = isNaN(right) ? (state[right] ?? 0) : parseInt(right);
+      let result = false;
+      if (op === "이해했다") result = lval == rval;
+      else if (op === "이해하지 못했다") result = lval != rval;
+      else if (op === "크다고") result = lval > rval;
+      else if (op === "작다고") result = lval < rval;
+      skipping = !result;
+      stack.push(skipping);
+      continue;
     }
-    try {
-      return eval(condition);
-    } catch (e) {
-      error(`조건 평가 오류: ${condition}`);
-      return false;
+    if (line.includes("생각을 바꿨다")) {
+      skipping = !stack[stack.length - 1];
+      continue;
     }
-  }
+    if (line.includes("생각을 그만뒀다")) {
+      stack.pop();
+      skipping = false;
+      continue;
+    }
 
-  function normalizeSubject(line) {
-    return line
-      .replace(/([가-힣]+)(은|는|이|가)/g, "$1이")
-      .replace(/([가-힣]+)(을|를)/g, "$1을")
-      .replace(/루프을/g, "루프를");
-  }
+    // 루프
+    if (line.includes("루프를 시작했다")) {
+      stack.push({ type: "loop", index: i });
+      continue;
+    }
+    if (line.includes("루프를 종료했다")) {
+      const loop = stack.pop();
+      if (loop && loop.type === "loop") i = loop.index;
+      continue;
+    }
+    if (line.includes("루프를 건너뛰었다")) {
+      let pos = i;
+      while (pos < code.length && !code[pos].includes("루프를 종료했다")) pos++;
+      i = pos + 1;
+      continue;
+    }
+    if (line.includes("루프를 깨뜨렸다")) {
+      let pos = i;
+      while (pos < code.length && !code[pos].includes("루프를 종료했다")) pos++;
+      i = pos + 1;
+      while (stack.length && stack[stack.length - 1].type !== "loop") stack.pop();
+      continue;
+    }
 
-  function runYugimunu() {
-    const code = document.getElementById("code").value;
-    const lines = code.split(/\n|\r/);
-    outputBuffer = "";
-    inputVars = {};
-    let i = 0;
-    let stack = [];
-    let skipping = false;
+    // 출력
+    const say = line.match(/(\S+)이\s+\"([^\"]+)\"[을를]\s+말했다/);
+    if (say) {
+      output(say[2]);
+      continue;
+    }
+    const valSay = line.match(/(\S+)이\s+(\S+)[을를]\s+말했다/);
+    if (valSay) {
+      const [_, subj, v] = valSay;
+      output(`${v} = ${state[v]}`);
+      continue;
+    }
 
-    while (i < lines.length) {
-      let line = lines[i++].trim();
-      if (line.startsWith("#") || line === "") continue;
+    // 입력
+    const input = line.match(/(\S+)이\s+\"?(\S+?)\"?[을를]\s+들었다/);
+    if (input) {
+      const [_, subj, name] = input;
+      const val = prompt(`${name} 값을 입력하세요:`);
+      state[name] = parseInt(val) || 0;
+      continue;
+    }
 
-      line = normalizeSubject(line);
+    // 연산자
+    const action = line.match(/(\S+)이\s+\"?(\S+?)\"?[을를]\s+(사랑했다|증오했다|껴안았다|밀어냈다|잊었다)/);
+    if (!action) {
+      error(`경민은 혼란에 빠졌다 — '${line}'은 알 수 없는 문장입니다.`);
+      continue;
+    }
+    const [_, subj, obj, verb] = action;
+    if (!(obj in state)) state[obj] = 0;
+    if (subj === obj && !["말했다", "들었다", "잊었다"].includes(verb)) {
+      error(`${subj}은 자신에게 감정을 적용할 수 없습니다.`);
+      continue;
+    }
+    if (enemies[subj] === obj) {
+      error(`${subj}과(와) ${obj}은 앙숙이라 함께 연산할 수 없습니다.`);
+      continue;
+    }
+    const sDead = isDead(subj), oDead = isDead(obj);
+    const sAlive = isAlive(subj), oAlive = isAlive(obj);
 
-      const conditionPattern = /(\S+)이\s+(.+?)고\s+생각했다/;
-      const logicOps = { "또한": "&&", "또는": "||" };
-      const compareOps = {
-        "이해했다": "==", 
-        "이해하지 못했다": "!=", 
-        "크다고": ">", 
-        "작다고": "<"
-      };
-
-      if (conditionPattern.test(line)) {
-        const [, subject, rawCond] = line.match(conditionPattern);
-        let conditionStr = rawCond;
-
-        for (const [k, v] of Object.entries(logicOps)) {
-          conditionStr = conditionStr.replaceAll(k, v);
-        }
-
-        conditionStr = conditionStr.replace(/"([^"]+)"은\s+"([^"]+)"을\s*(이해했다|이해하지 못했다|크다고|작다고)/g,
-          (_, left, right, op) => `(state["${left}"] ${compareOps[op]} state["${right}"])`);
-
-        conditionStr = conditionStr.replace(/"([^"]+)"은\s+(\d+)\s*을\s*(이해했다|이해하지 못했다|크다고|작다고)/g,
-          (_, left, right, op) => `(state["${left}"] ${compareOps[op]} ${right})`);
-
-        skipping = !evaluateCondition(conditionStr);
-        stack.push(skipping);
-        continue;
-      }
-
-      if (line.includes("생각을 바꿨다")) {
-        if (stack.length) skipping = stack[stack.length - 1];
-        continue;
-      }
-
-      if (line.includes("생각을 그만뒀다")) {
-        stack.pop();
-        skipping = false;
-        continue;
-      }
-
-      if (line.includes("루프를 시작했다")) {
-        stack.push({ type: "loop", index: i });
-        continue;
-      }
-
-      if (line.includes("루프를 종료했다")) {
-        const loop = stack.pop();
-        if (loop && loop.type === "loop") i = loop.index;
-        continue;
-      }
-
-      if (line.includes("루프를 건너뛰었다")) {
-        let top = stack[stack.length - 1];
-        if (top && top.type === "loop") {
-          while (i < lines.length && !lines[i].includes("루프를 종료했다")) i++;
-        }
-        continue;
-      }
-
-      if (line.includes("루프를 깨뜨렸다")) {
-        while (stack.length && stack[stack.length - 1].type !== "loop") stack.pop();
-        i++; while (i < lines.length && !lines[i].includes("루프를 종료했다")) i++;
-        continue;
-      }
-
-      if (skipping) continue;
-
-      const sayMatch = line.match(/(\S+)이\s+"([^"]+)"[을를] 말했다/);
-      if (sayMatch) {
-        output(sayMatch[2]);
-        continue;
-      }
-
-      const match = line.match(/(\S+)이\s+"?(\S+?)"?을\s+(사랑했다|증오했다|껴안았다|밀어냈다|잊었다|말했다|들었다)/);
-      if (!match) {
-        error(`경민은 혼란에 빠졌다 — '${line}'은 알 수 없는 문장입니다.`);
-        continue;
-      }
-
-      const [_, subj, obj, verb] = match;
-      const objKey = obj.replace(/^"|"$/g, "");
-
-      if (!(objKey in state)) state[objKey] = 0;
-      if (subj === objKey && verb !== "말했다" && verb !== "들었다" && verb !== "잊었다") {
-        error(`${subj}은 자신에게 감정을 적용할 수 없습니다.`);
-        continue;
-      }
-
-      const sDead = isDead(subj); const oDead = isDead(objKey);
-      const sAlive = isAlive(subj); const oAlive = isAlive(objKey);
-
-      if (enemies[subj] === objKey) {
-        error(`${subj}과(와) ${objKey}은 앙숙이라 함께 연산할 수 없습니다.`);
-        continue;
-      }
-
-      switch (verb) {
-        case "사랑했다":
-          if ((sDead || oDead) && subj !== "경민") { error(`${verb}는 생존자 전용입니다.`); break; }
-          state[objKey] += 1; break;
-        case "껴안았다":
-          if ((sDead || oDead) && subj !== "경민") { error(`${verb}는 생존자 전용입니다.`); break; }
-          state[objKey] *= (state[subj] || 1); break;
-        case "증오했다":
-          if ((sAlive || oAlive) && subj !== "경민") { error(`${verb}는 사망자 전용입니다.`); break; }
-          state[objKey] -= 1; break;
-        case "밀어냈다":
-          if ((sAlive || oAlive) && subj !== "경민") { error(`${verb}는 사망자 전용입니다.`); break; }
-          state[objKey] = Math.floor(state[objKey] / (state[subj] || 1)); break;
-        case "잊었다": state[objKey] = 0; break;
-        case "말했다": output(`${objKey} = ${state[objKey]}`); break;
-        case "들었다":
-          const val = prompt(`${objKey} 값을 입력하세요:`);
-          state[objKey] = parseInt(val) || 0;
-          inputVars[objKey] = state[objKey];
+    switch (verb) {
+      case "사랑했다":
+        if ((sDead || oDead) && subj !== "경민") {
+          error(`${verb}는 생존자 전용입니다.`);
           break;
-      }
+        }
+        state[obj] += 1; break;
+      case "껴안았다":
+        if ((sDead || oDead) && subj !== "경민") {
+          error(`${verb}는 생존자 전용입니다.`);
+          break;
+        }
+        state[obj] *= (state[subj] || 1); break;
+      case "증오했다":
+        if ((sAlive || oAlive) && subj !== "경민") {
+          error(`${verb}는 사망자 전용입니다.`);
+          break;
+        }
+        state[obj] -= 1; break;
+      case "밀어냈다":
+        if ((sAlive || oAlive) && subj !== "경민") {
+          error(`${verb}는 사망자 전용입니다.`);
+          break;
+        }
+        state[obj] = Math.floor(state[obj] / (state[subj] || 1)); break;
+      case "잊었다":
+        state[obj] = 0; break;
     }
-
-    document.getElementById("output").textContent = outputBuffer;
   }
+  outputBox.textContent = outputBuffer || "(출력 없음)";
+}
 </script>
 </body>
 </html>
