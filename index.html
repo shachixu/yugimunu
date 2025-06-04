@@ -12,7 +12,7 @@
 </head>
 <body>
   <h1>유기문어(有機文語)</h1>
-  <textarea id="code"># 여기에 유기문어 코드를 입력하세요</textarea>
+  <textarea id="code"># 여기에 유기문어 코드를 입력하세요.</textarea>
   <br />
   <button onclick="runYugimunu()">실행하기</button>
   <pre id="output"></pre>
@@ -41,12 +41,22 @@ window.runYugimunu = function() {
     if (ifMatch) {
       const [_, subject, left, right, op] = ifMatch;
       const lval = isNaN(left) ? (state[left] ?? 0) : parseInt(left);
-      const rval = isNaN(right) ? (state[right] ?? 0) : parseInt(right);
+      let rval;
+      if (!isNaN(right)) rval = parseInt(right);
+      else if (state[right] !== undefined) rval = state[right];
+      else rval = right;
+
       let result = false;
-      if (op === "이해했다") result = lval == rval;
-      else if (op === "이해하지 못했다") result = lval != rval;
-      else if (op === "크다고") result = lval > rval;
-      else if (op === "작다고") result = lval < rval;
+      if (typeof lval === "string" || typeof rval === "string") {
+        if (op === "이해했다") result = lval === rval;
+        else if (op === "이해하지 못했다") result = lval !== rval;
+        else error(`${subject}이 ${left}은 ${right}을 ${op} — 문자열에는 비교 불가.`);
+      } else {
+        if (op === "이해했다") result = lval == rval;
+        else if (op === "이해하지 못했다") result = lval != rval;
+        else if (op === "크다고") result = lval > rval;
+        else if (op === "작다고") result = lval < rval;
+      }
       skipping = !result;
       stack.push(skipping);
       continue;
