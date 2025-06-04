@@ -64,8 +64,16 @@ window.runYugimunu = function() {
   while (i < code.length) {
     let line = code[i++].trim();
     if (!line || line.startsWith("#")) continue;
-    if (skipping && !line.includes("생각을 그만뒀다")) continue;
 
+    // 생각 종료
+    if (line.includes("생각을 그만뒀다")) {
+      skipping = false;
+      stack.pop();
+      continue;
+    }
+    if (skipping) continue;
+
+    // 조건문
     const ifMatch = line.match(/(\S+)이\s+"?(\S+?)"?은\s+"?(\S+?)"?을\s+(이해했다|이해하지 못했다|크다고|작다고)\s+생각했다/);
     if (ifMatch) {
       const [_, subject, left, right, op] = ifMatch;
@@ -88,6 +96,14 @@ window.runYugimunu = function() {
       }
       skipping = !result;
       stack.push(skipping);
+      continue;
+    }
+
+    // 일반 명령
+    const say = line.match(/(\S+)이\s+\"(.+?)\"를\s+말했다/);
+    if (say) {
+      const [_, subj, message] = say;
+      output(message);
       continue;
     }
 
