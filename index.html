@@ -73,10 +73,10 @@ window.runYugimunu = function() {
     }
     if (skipping) continue;
 
-    // 조건문 개선
-    const ifMatch = line.match(/(\S+)이\s+"?(\S+?)"?[은는]\s+"?(\S+?)"?[을를]\s+(이해했다|이해하지 못했다|크다고|작다고)\s+생각했다/);
+    // 조건문 개선 - 조사 자유롭게 허용
+    const ifMatch = line.match(/(\S+)이\s+"?(\S+?)"?([은는])\s+"?(\S+?)"?([을를])\s+(이해했다|이해하지 못했다|크다고|작다고)\s+생각했다/);
     if (ifMatch) {
-      const [_, subject, left, right, op] = ifMatch;
+      const [_, subject, left, _, right, __, op] = ifMatch;
       const lval = isNaN(left) ? (state[left] ?? left) : parseInt(left);
       const rval = isNaN(right) ? (state[right] ?? right) : parseInt(right);
 
