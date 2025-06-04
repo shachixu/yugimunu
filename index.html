@@ -133,8 +133,6 @@
         conditionStr = conditionStr.replace(/"([^"]+)"은\s+(\d+)\s*을\s*(이해했다|이해하지 못했다|크다고|작다고)/g,
           (_, left, right, op) => `(state["${left}"] ${compareOps[op]} ${right})`);
 
-        conditionStr = c
-
 
       if (line.includes("생각을 바꿨다")) {
         if (stack.length) skipping = stack[stack.length - 1];
