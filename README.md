@@ -6,6 +6,6 @@
 
 또한 [여기](https://shachixu.github.io/yugimunu/)에서 테스트 가능합니다.  
 
-※현재 오류가 많습니다. 
+※현재 오류가 많으며 개선 중입니다.
 
 [원작 소설 『유기무녀』 보러가기](https://novelpia.com/novel/21232)
