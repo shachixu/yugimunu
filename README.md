@@ -1,4 +1,4 @@
-#Yugimunu Language Interpreter
+# Yugimunu Language Interpreter
 
 웹소설 유기무녀(遺棄巫女) 기반 프로그램이 언어 유기문어(有機文語) 인터프리터입니다.  
 
