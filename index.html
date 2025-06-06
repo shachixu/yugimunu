@@ -84,32 +84,41 @@
     let conditionStack = []; // 조건문의 true/false 상태를 저장
 
     // 주어와 목적어 구분 함수 (은/는, 이/가, 을/를 모두 처리)
+    // 중요: 따옴표를 제거하지 않고 그대로 반환합니다.
     function parseSubjectAndObject(line) {
+      let subj = null;
+      let obj = null;
+      let verb = null;
+      let fullMatch = false;
+
       // 패턴 1: 주어 + (은/는/이/가) + 목적어/값 + (을/를) + 동사 (가장 일반적인 형태)
-      // 그룹 1: 주어
-      // 그룹 2: 목적어/값 (동사 앞에 오는 내용)
-      const match = line.match(
-          /^("?[\w가-힣]+)"?(?:은|는|이|가)\s*(.+?)(?:을|를)\s*[\w가-힣]+.*$/
+      const fullPatternMatch = line.match(
+          /^("?[\w가-힣]+)"?(?:은|는|이|가)\s*(.+?)(?:을|를)\s*([\w가-힣]+).*$/
       );
 
-      if (match) {
-          const subj = match[1];
-          const objContent = match[2].trim(); // 그룹 2가 목적어/값
-          return [subj, objContent];
+      if (fullPatternMatch) {
+          subj = fullPatternMatch[1]; // 따옴표 제거 안함
+          obj = fullPatternMatch[2].trim(); // 따옴표 제거 안함
+          verb = fullPatternMatch[3];
+          fullMatch = true;
+          return { subj: subj, obj: obj, verb: verb, fullMatch: fullMatch };
       }
 
-      // 패턴 2: 주어 + (은/는/이|가) + 동사 (목적어/값 없음)
-      // 예: "솔빈이 잊었다", "경민이 루프를 시작했다"
-      // 그룹 1: 주어
+      // 패턴 2: 주어 + (은/는/이|가) + 동사 (목적어/값 없음, 주어만으로 동작하는 경우)
       const simpleSubjMatch = line.match(
           /^("?[\w가-힣]+)"?(?:은|는|이|가)\s*([\w가-힣]+.*)$/
       );
       if (simpleSubjMatch) {
-          const subj = simpleSubjMatch[1];
-          return [subj, null];
+          subj = simpleSubjMatch[1]; // 따옴표 제거 안함
+          verb = simpleSubjMatch[2].trim();
+          if (verb.startsWith("잊었다")) {
+            obj = subj; // obj를 subj로 설정하여 스스로를 대상으로 함
+            fullMatch = false; // 목적어가 명시적으로 제공되지 않음
+          }
+          return { subj: subj, obj: obj, verb: verb, fullMatch: fullMatch };
       }
 
-      return [null, null];
+      return { subj: null, obj: null, verb: null, fullMatch: false };
     }
 
     // 조건식을 평가하는 함수
@@ -119,11 +128,12 @@
       if (!conditionMatch) {
           throw new Error(`조건문의 형식이 올바르지 않습니다: '${line}'`);
       }
-      const subjVarName = conditionMatch[1];
+      const rawSubjVarName = conditionMatch[1]; // 따옴표 포함될 수 있음
+      const subjVarName = rawSubjVarName.replace(/"/g, ''); // 주어는 따옴표 제거
       const conditionPart = conditionMatch[2].trim();
 
       if (!vars[subjVarName]) {
-          throw new Error(`조건식에서 변수 '${subjVarName}'를 찾을 수 없습니다.`);
+          throw new Error(`조건식에서 변수 '${subjVarName}'를 찾을 수 없습니다. 선언되지 않았거나 오타입니다.`);
       }
 
       // AND(또한)와 OR(또는) 처리
@@ -143,27 +153,26 @@
     // 단순 조건을 평가하는 함수
     function evaluateSimpleCondition(subjVarName, conditionText) {
       const getVal = (valOrVarName) => {
-        // 문자열 리터럴 처리 (예: "안녕하세요")
-        // U+0022 ("), U+201D (”) 모두 고려
-        if ((valOrVarName.startsWith('"') && valOrVarName.endsWith('"')) || (valOrVarName.startsWith('”') && valOrVarName.endsWith('”'))) {
-          return valOrVarName.substring(1, valOrVarName.length - 1);
+        // 1. 문자열 리터럴인 경우 (따옴표로 시작/끝) - 우선적으로 확인
+        if (valOrVarName.startsWith("\"") && valOrVarName.endsWith("\"") && valOrVarName.length >= 2) {
+            return valOrVarName.substring(1, valOrVarName.length - 1);
         }
-        // 변수 값 처리 (예: 윤설)
-        if (vars[valOrVarName] && typeof vars[valOrVarName].value === 'number') {
-          return vars[valOrVarName].value;
+        // 2. 변수 이름인 경우
+        if (vars[valOrVarName] !== undefined) {
+            return vars[valOrVarName].value;
         }
-        // 숫자 리터럴 처리 (예: 10)
+        // 3. 숫자 리터럴인 경우
         const numVal = Number(valOrVarName);
         if (!isNaN(numVal)) {
-          return numVal;
+            return numVal;
         }
-        // 그 외 (예: 존재하지 않는 변수나 유효하지 않은 리터럴)
+        // 4. 그 외 알 수 없는 경우 (오류)
         throw new Error(`조건식에서 알 수 없는 값: '${valOrVarName}'`);
       };
 
       const subjVal = vars[subjVarName]?.value;
       if (subjVal === undefined) {
-          throw new Error(`조건식에서 변수 '${subjVarName}'를 찾을 수 없습니다.`);
+          throw new Error(`조건식에서 변수 '${subjVarName}'의 값을 가져올 수 없습니다.`);
       }
 
       if (conditionText.includes("크다")) {
@@ -174,15 +183,28 @@
         const otherVal = getVal(conditionText.split("작다")[1].trim());
         return subjVal < otherVal;
       }
-      if (conditionText.includes("이해했다")) {
-        const otherVal = getVal(conditionText.split("이해했다")[1].trim());
-        return subjVal == otherVal; // '=='로 값만 비교
+      // 'X을/를 이해했다' 패턴 처리
+      if (conditionText.includes("을 이해했다") || conditionText.includes("를 이해했다")) {
+          const match = conditionText.match(/(.+?)(?:을|를)\s*이해했다/);
+          if (match) {
+              const targetVal = getVal(match[1].trim());
+              return subjVal == targetVal; // '=='로 값만 비교
+          }
+          throw new Error(`'이해했다' 조건의 형식이 올바르지 않습니다: '${conditionText}'`);
       }
-      if (conditionText.includes("이해하지 못했다")) {
-        const otherVal = getVal(conditionText.split("이해하지 못했다")[1].trim());
-        return subjVal != otherVal; // '!='로 값만 비교
+      // 'X을/를 이해하지 못했다' 패턴 처리
+      if (conditionText.includes("을 이해하지 못했다") || conditionText.includes("를 이해하지 못했다")) {
+          const match = conditionText.match(/(.+?)(?:을|를)\s*이해하지 못했다/);
+          if (match) {
+              const targetVal = getVal(match[1].trim());
+              return subjVal != targetVal; // '!='로 값만 비교
+          }
+          throw new Error(`'이해하지 못했다' 조건의 형식이 올바르지 않습니다: '${conditionText}'`);
       }
-      return false;
+      
+      // 그 외 단순 값 비교 (예: "5", "경민")
+      const targetVal = getVal(conditionText); // conditionText 자체가 비교 대상 값
+      return subjVal == targetVal; // 기본적으로 '같다'로 처리 (예: "경민이 5라고 생각했다" -> 경민 == 5)
     }
 
     // 유효한 연산인지 확인하는 함수
@@ -193,27 +215,34 @@
         "윤설": ["츠카사"]
     };
 
-    function isValidOperation(subj, obj, operationType) {
-      // 변수 존재 여부 확인 (obj가 리터럴일 수 있으므로 vars[obj]는 체크하지 않음)
+    function isValidOperation(rawSubj, rawObj, operationType) {
+      const subj = rawSubj.replace(/"/g, ''); // 주어는 따옴표 제거
+      // obj가 변수 이름인지 판단 (따옴표가 없고 숫자로 변환되지 않으면 변수 이름)
+      const objIsVar = rawObj !== null && !(rawObj.startsWith("\"") && rawObj.endsWith("\"")) && isNaN(Number(rawObj));
+      const obj = objIsVar ? rawObj : null; // obj가 변수일 때만 obj 이름 저장
+
+      // 주어(subj)는 항상 변수여야 함
       if (!vars[subj]) {
-        throw new Error(`변수 '${subj}'를 찾을 수 없습니다. 문법 오류이거나 정의되지 않은 변수입니다.`);
+        throw new Error(`연산의 주어 '${subj}'를 찾을 수 없습니다. 문법 오류이거나 정의되지 않은 변수입니다.`);
       }
-      // obj가 변수 이름일 경우에만 존재 여부 확인
-      if (obj && !obj.startsWith('"') && !obj.endsWith('"') && !obj.startsWith('”') && !obj.endsWith('”') && isNaN(Number(obj)) && !vars[obj]) {
-         throw new Error(`변수 '${obj}'를 찾을 수 없습니다. 문법 오류이거나 정의되지 않은 변수입니다.`);
+      
+      // obj가 변수 이름일 경우, vars에 있어야 함
+      if (objIsVar && vars[obj] === undefined) {
+          throw new Error(`연산의 목적어 '${rawObj}'를 찾을 수 없습니다. 문법 오류이거나 정의되지 않은 변수입니다.`);
       }
 
-
-      // 주어와 목적어가 같을 수 없음
-      if (vars[subj] && vars[obj] && subj === obj) {
-        throw new Error(`'${subj}'와 '${obj}'는 같을 수 없습니다. 주어와 목적어가 같은 인물인 경우는 금지됩니다.`);
+      // 주어와 목적어가 같을 수 없음 (잊었다, 스스로 사랑 제외)
+      if (subj === obj && operationType !== "잊었다" && !(subj === "경민" && obj === "경민" && operationType === "사랑했다")) {
+        throw new Error(`'${subj}'와 '${obj}'는 같을 수 없습니다. 주어와 목적어가 같은 인물인 경우는 금지됩니다. ('잊었다'와 '경민이 경민을 사랑했다' 제외)`);
       }
 
       const subjStatus = vars[subj].status;
-      const objStatus = vars[obj]?.status; // obj가 리터럴이면 status가 없을 수 있음
+      // obj가 변수 이름일 경우에만 status를 가져옴
+      const objStatus = objIsVar ? vars[obj].status : undefined; 
 
       // 앙숙 관계에서의 연산 제한
-      if ((enemies[subj] && enemies[subj].includes(obj)) || (enemies[obj] && enemies[obj].includes(subj))) {
+      // 단, '잊었다'는 앙숙 관계에서도 허용 (초기화 개념)
+      if (operationType !== "잊었다" && objIsVar && ((enemies[subj] && enemies[subj].includes(obj)) || (enemies[obj] && enemies[obj].includes(subj)))) {
         throw new Error(`${subj}와 ${obj}는 앙숙 관계입니다. 함께 연산을 할 수 없습니다.`);
       }
 
@@ -221,18 +250,28 @@
       switch (operationType) {
         case "사랑했다": // + (생존자 전용)
         case "껴안았다": // * (생존자 전용)
-          if (subjStatus !== "생존" && subjStatus !== "자유") { // 경민은 '자유'이므로 항상 가능
-            throw new Error(`${subj}는(은) 사망자입니다. '${operationType}' 연산은 생존자만 할 수 있습니다.`);
+          // 주어(subj)는 연산 가능 상태여야 함 (경민은 자유, 나머지는 생존)
+          if (subjStatus !== "생존" && subjStatus !== "자유") {
+            throw new Error(`${subj}는(은) 사망자입니다. ${operationType} 연산을 수행할 수 없습니다.`);
+          }
+          // 목적어(obj)가 변수일 경우, 목적어 역시 생존 상태여야 함 (경민이 자신을 사랑하는 경우 제외)
+          if (objIsVar && vars[obj] && vars[obj].status !== "생존" && !(subj === "경민" && obj === "경민")) { 
+             throw new Error(`${obj}는(은) 사망자입니다. ${operationType} 연산의 대상이 될 수 없습니다.`);
           }
           break;
         case "증오했다": // - (사망자 전용)
         case "밀어냈다": // // (사망자 전용)
-          if (subjStatus !== "사망" && subjStatus !== "자유") { // 경민은 '자유'이므로 항상 가능
-            throw new Error(`${subj}는(은) 생존자입니다. '${operationType}' 연산은 사망자만 할 수 있습니다.`);
+          // 주어(subj)는 연산 가능 상태여야 함 (경민은 자유, 나머지는 사망)
+          if (subjStatus !== "사망" && subjStatus !== "자유") {
+            throw new Error(`${subj}는(은) 생존자입니다. ${operationType} 연산을 수행할 수 없습니다.`);
+          }
+          // 목적어(obj)가 변수일 경우, 목적어 역시 사망 상태여야 함
+          if (objIsVar && vars[obj] && vars[obj].status !== "사망") {
+             throw new Error(`${obj}는(은) 생존자입니다. ${operationType} 연산의 대상이 될 수 있습니다.`);
           }
           break;
         case "잊었다": // = 0 (누구나 사용 가능)
-          // 특별한 제약 없음
+          // 특별한 제약 없음 (앙숙 관계 허용됨)
           break;
       }
       return true;
@@ -253,29 +292,27 @@
       return numInput;
     }
 
-    // 한 줄의 유기문어 코드를 분석하고 실행하는 함수
+    // 한 줄의 유기문어 코드를 분석하고 실행하는 함수 (명령어만 처리)
     function parseLine(line) {
       const output = [];
+      console.log(`  -> parseLine 실행: "${line}"`); // parseLine 진입 로그
 
       // 변수 할당: X이 Y를 이해했다 (X = Y)
-      // 이 구문은 '생각했다'와 함께 사용되지 않을 때만 할당으로 간주
       if (line.includes("이해했다") && !line.includes("고 생각했다")) {
-          const [subj, obj] = parseSubjectAndObject(line);
+          const { subj: rawSubj, obj: rawObj, verb, fullMatch } = parseSubjectAndObject(line);
+          const subj = rawSubj ? rawSubj.replace(/"/g, '') : null; // 주어의 따옴표는 여기서 제거
+          const obj = rawObj ? rawObj : null; // 목적어의 따옴표는 그대로 유지하여 판단에 사용
+
           if (subj && obj) {
               if (!vars[subj]) {
-                  throw new Error(`변수 '${subj}'는 정의되지 않았습니다.`);
+                  throw new Error(`변수 할당: '${subj}'는 정의되지 않았습니다.`);
               }
               let valueToAssign;
-              // obj가 문자열 리터럴인지 확인 (예: "안녕하세요" 또는 “안녕하세요”)
-              if ((obj.startsWith('"') && obj.endsWith('"')) || (obj.startsWith('”') && obj.endsWith('”'))) {
+              if (obj.startsWith("\"") && obj.endsWith("\"") && obj.length >= 2) { // 문자열 리터럴
                   valueToAssign = obj.substring(1, obj.length - 1);
-              }
-              // obj가 변수 이름인지 확인 (예: "윤설")
-              else if (vars[obj]) {
+              } else if (vars[obj] !== undefined) { // 변수 이름
                   valueToAssign = vars[obj].value;
-              }
-              // 그 외의 경우 숫자 리터럴로 간주
-              else {
+              } else { // 숫자 리터럴
                   const numVal = Number(obj);
                   if (isNaN(numVal)) {
                       throw new Error(`할당할 수 없는 값: '${obj}'. 숫자, 문자열 리터럴 또는 정의된 변수여야 합니다.`);
@@ -283,123 +320,173 @@
                   valueToAssign = numVal;
               }
               vars[subj].value = valueToAssign;
+              console.log(`    변수 할당: ${subj} = ${valueToAssign}, 현재 값: ${vars[subj].value}`);
           } else {
               throw new Error(`'이해했다' 할당 구문이 올바르지 않습니다: '${line}' (주어와 목적어 필요)`);
           }
       }
       // 변수 입력을 위한 "을 들었다" / "를 들었다" 처리
       else if (line.includes("을 들었다") || line.includes("를 들었다")) {
-        // 경민이 "변수이름"을 들었다 / 경민이 변수이름을 들었다
-        const match = line.match(/경민이\s+(["”]?[\w가-힣]+["”]?)\s*(?:을|를)\s*들었다/);
+        const match = line.match(/경민이\s+("?[\w가-힣]+"?)\s*(?:을|를)\s*들었다/);
         if (match) {
-          const variable = match[1].replace(/["”]/g, ''); // 따옴표 제거
-          if (vars[variable]) { // 정의된 변수만 처리
-            vars[variable].value = getInputForVariable(variable);
+          const variable = match[1].replace(/"/g, ''); // 따옴표 제거
+          if (vars[variable] !== undefined) { 
+            const inputValue = getInputForVariable(variable);
+            vars[variable].value = inputValue;
+            console.log(`    입력 받기: ${variable} = ${inputValue}, 현재 값: ${vars[variable].value}`);
           } else {
-            throw new Error(`'${variable}' 변수는 정의되지 않았습니다.`);
+            throw new Error(`'${variable}' 변수는 정의되지 않아 값을 입력받을 수 없습니다.`);
           }
         } else {
-             throw new Error(`'들었다' 구문 형식이 올바르지 않습니다: '${line}'`);
+             throw new Error(`'들었다' 구문 형식이 올바르지 않습니다: '${line}'. '경민이 [변수]를 들었다' 형식이어야 합니다.`);
         }
       }
       // 변수 출력
       else if (line.includes("을 말했다") || line.includes("를 말했다")) {
-        // 경민이 "메시지"을 말했다 / 경민이 "메시지"를 말했다 / 경민이 변수를 말했다
-        // 수정된 부분: 따옴표 안의 내용을 캡처하고, 따옴표 유무에 따라 처리
-        // 그룹 1: 따옴표가 있는 경우 따옴표 안의 내용, 없는 경우 변수명
-        const match = line.match(/경민이\s+(?:["”](.+?)["”]|([\w가-힣]+))\s*(?:을|를)\s*말했다/); 
+        const match = line.match(/경민이\s+(?:\"(.+?)\"|([\w가-힣]+))\s*(?:을|를)\s*말했다/);
         
         if (match) {
           let val;
-          if (match[1] !== undefined) { // 첫 번째 그룹이 매칭되었으면 (따옴표 있는 문자열)
-              val = match[1];
-          } else if (match[2] !== undefined) { // 두 번째 그룹이 매칭되었으면 (따옴표 없는 변수)
-              val = match[2];
+          if (match[1] !== undefined) { // 따옴표가 있는 문자열 리터럴
+              val = match[1]; 
+              output.push(val);
+              console.log(`    출력 (리터럴): "${val}"`);
+          } else if (match[2] !== undefined) { // 따옴표 없는 변수 이름
+              val = match[2]; 
+              if (vars[val] !== undefined) { 
+                output.push(vars[val].value);
+                console.log(`    출력 (변수): ${val} = ${vars[val].value}`);
+              } else { 
+                throw new Error(`출력할 대상 '${val}'이 정의되지 않은 변수입니다. 문자열 리터럴은 따옴표로 감싸야 합니다.`);
+              }
           } else {
               throw new Error(`'말했다' 구문의 대상을 찾을 수 없습니다: '${line}'`);
           }
-
-          // 이제 val은 따옴표가 제거된 문자열 리터럴이거나 변수 이름임
-          if (vars[val] !== undefined) { // 변수가 정의되어 있으면 변수 값 출력 (값이 0일 수 있으므로 undefined 체크)
-            output.push(vars[val].value);
-          } else { // 변수가 아니면 문자열 리터럴로 간주
-            output.push(val);
-          }
         } else {
-             throw new Error(`'말했다' 구문 형식이 올바르지 않습니다: '${line}'`);
+             throw new Error(`'말했다' 구문 형식이 올바르지 않습니다: '${line}'. '경민이 "문자열"을 말했다' 또는 '경민이 변수를 말했다' 형식이어야 합니다.`);
         }
       }
       // 연산자: 사랑했다 (+)
       else if (line.includes("사랑했다")) {
-        const [subj, obj] = parseSubjectAndObject(line);
-        if (subj && obj && isValidOperation(subj, obj, "사랑했다")) {
-          // obj가 숫자 리터럴이거나 변수 값이어야 함
-          const objVal = (obj.startsWith('"') && obj.endsWith('"')) || (obj.startsWith('”') && obj.endsWith('”')) ? 0 : (vars[obj]?.value ?? Number(obj));
-          vars[subj].value += (isNaN(objVal) ? 1 : objVal);
-        } else if (subj && !obj && line.includes("경민이 경민을 사랑했다")) { // 스스로 사랑 예외 처리
-             if (subj === "경민") vars[subj].value += 1;
-             else throw new Error("경민 외의 인물은 스스로 사랑할 수 없습니다.");
+        const { subj: rawSubj, obj: rawObj, verb, fullMatch } = parseSubjectAndObject(line);
+        const subj = rawSubj ? rawSubj.replace(/"/g, '') : null;
+        // obj가 변수인지 판단 (따옴표가 없고 숫자로 변환되지 않으면 변수 이름)
+        const objIsVar = rawObj !== null && !(rawObj.startsWith("\"") && rawObj.endsWith("\"")) && isNaN(Number(rawObj));
+        const obj = objIsVar ? rawObj : null;
+
+        if (subj && rawObj) { // rawObj를 사용하여 원본 목적어 값으로 유효성 검사
+          if (subj === "경민" && obj === "경민") { 
+              if (isValidOperation(rawSubj, rawObj, "사랑했다")) { 
+                 vars["경민"].value += 1;
+                 console.log(`    경민 스스로 사랑했다: 경민 = ${vars["경민"].value}`);
+              }
+          }
+          else if (objIsVar) { // 목적어가 변수
+              if (isValidOperation(rawSubj, rawObj, "사랑했다")) { 
+                 vars[obj].value += 1;
+                 console.log(`    ${subj}이 ${obj}를 사랑했다: ${obj} = ${vars[obj].value}`);
+              }
+          }
+          else { // 목적어가 리터럴인 경우 (숫자 리터럴만 지원)
+            const numVal = Number(rawObj); // rawObj 사용
+            if (!isNaN(numVal)) {
+              throw new Error(`'${rawObj}'(리터럴)에 대한 '사랑했다' 연산은 현재 지원하지 않습니다. 변수여야 합니다.`);
+            } else {
+              throw new Error(`'${subj}이(가) ${rawObj}를 사랑했다' 구문은 현재 지원하지 않거나 잘못된 형식입니다.`);
+            }
+          }
         } else {
           throw new Error(`'사랑했다' 연산에 필요한 주어와 목적어를 찾을 수 없습니다.`);
         }
       }
       // 연산자: 증오했다 (-)
       else if (line.includes("증오했다")) {
-        const [subj, obj] = parseSubjectAndObject(line);
-        if (subj && obj && isValidOperation(subj, obj, "증오했다")) {
-          const objVal = (obj.startsWith('"') && obj.endsWith('"')) || (obj.startsWith('”') && obj.endsWith('”')) ? 0 : (vars[obj]?.value ?? Number(obj));
-          vars[subj].value -= (isNaN(objVal) ? 1 : objVal);
+        const { subj: rawSubj, obj: rawObj, verb, fullMatch } = parseSubjectAndObject(line);
+        const subj = rawSubj ? rawSubj.replace(/"/g, '') : null;
+        const objIsVar = rawObj !== null && !(rawObj.startsWith("\"") && rawObj.endsWith("\"")) && isNaN(Number(rawObj));
+        const obj = objIsVar ? rawObj : null;
+
+        if (subj && rawObj) {
+            if (objIsVar) {
+                if (isValidOperation(rawSubj, rawObj, "증오했다")) {
+                    vars[obj].value -= 1;
+                    console.log(`    ${subj}이 ${obj}를 증오했다: ${obj} = ${vars[obj].value}`);
+                }
+            } else {
+                const numVal = Number(rawObj);
+                if (!isNaN(numVal)) {
+                  throw new Error(`'${rawObj}'(리터럴)에 대한 '증오했다' 연산은 현재 지원하지 않습니다. 변수여야 합니다.`);
+                } else {
+                  throw new Error(`'${subj}이(가) ${rawObj}를 증오했다' 구문은 현재 지원하지 않거나 잘못된 형식입니다.`);
+                }
+            }
         } else {
           throw new Error(`'증오했다' 연산에 필요한 주어와 목적어를 찾을 수 없습니다.`);
         }
       }
       // 연산자: 껴안았다 (*)
       else if (line.includes("껴안았다")) {
-        const [subj, obj] = parseSubjectAndObject(line);
-        if (subj && obj && isValidOperation(subj, obj, "껴안았다")) {
-          const objVal = (obj.startsWith('"') && obj.endsWith('"')) || (obj.startsWith('”') && obj.endsWith('”')) ? 1 : (vars[obj]?.value ?? Number(obj));
-          vars[subj].value *= (isNaN(objVal) ? 1 : objVal);
+        const { subj: rawSubj, obj: rawObj, verb, fullMatch } = parseSubjectAndObject(line);
+        const subj = rawSubj ? rawSubj.replace(/"/g, '') : null;
+        const objIsVar = rawObj !== null && !(rawObj.startsWith("\"") && rawObj.endsWith("\"")) && isNaN(Number(rawObj));
+        const obj = objIsVar ? rawObj : null;
+
+        if (subj && rawObj) {
+            if (objIsVar) {
+                if (isValidOperation(rawSubj, rawObj, "껴안았다")) {
+                    vars[obj].value *= 2;
+                    console.log(`    ${subj}이 ${obj}를 껴안았다: ${obj} = ${vars[obj].value}`);
+                }
+            } else {
+                const numVal = Number(rawObj);
+                if (!isNaN(numVal)) {
+                  throw new Error(`'${rawObj}'(리터럴)에 대한 '껴안았다' 연산은 현재 지원하지 않습니다. 변수여야 합니다.`);
+                } else {
+                  throw new Error(`'${subj}이(가) ${rawObj}를 껴안았다' 구문은 현재 지원하지 않거나 잘못된 형식입니다.`);
+                }
+            }
         } else {
           throw new Error(`'껴안았다' 연산에 필요한 주어와 목적어를 찾을 수 없습니다.`);
         }
       }
       // 연산자: 밀어냈다 (//)
       else if (line.includes("밀어냈다")) {
-        const [subj, obj] = parseSubjectAndObject(line);
-        if (subj && obj && isValidOperation(subj, obj, "밀어냈다")) {
-          const divisor = (obj.startsWith('"') && obj.endsWith('"')) || (obj.startsWith('”') && obj.endsWith('”')) ? 1 : (vars[obj]?.value ?? Number(obj));
-          if (isNaN(divisor) || divisor === 0) {
-              throw new Error(`0으로 나눌 수 없거나 유효하지 않은 값으로 나눌 수 없습니다: '${obj}'`);
-          }
-          vars[subj].value = Math.floor(vars[subj].value / divisor);
+        const { subj: rawSubj, obj: rawObj, verb, fullMatch } = parseSubjectAndObject(line);
+        const subj = rawSubj ? rawSubj.replace(/"/g, '') : null;
+        const objIsVar = rawObj !== null && !(rawObj.startsWith("\"") && rawObj.endsWith("\"")) && isNaN(Number(rawObj));
+        const obj = objIsVar ? rawObj : null;
+
+        if (subj && rawObj) {
+            if (objIsVar) {
+                if (isValidOperation(rawSubj, rawObj, "밀어냈다")) {
+                    vars[obj].value = Math.floor(vars[obj].value / 2);
+                    console.log(`    ${subj}이 ${obj}를 밀어냈다: ${obj} = ${vars[obj].value}`);
+                }
+            } else {
+                const numVal = Number(rawObj);
+                if (!isNaN(numVal)) {
+                  throw new Error(`'${rawObj}'(리터럴)에 대한 '밀어냈다' 연산은 현재 지원하지 않습니다. 변수여야 합니다.`);
+                } else {
+                  throw new Error(`'${subj}이(가) ${rawObj}를 밀어냈다' 구문은 현재 지원하지 않거나 잘못된 형식입니다.`);
+                }
+            }
         } else {
           throw new Error(`'밀어냈다' 연산에 필요한 주어와 목적어를 찾을 수 없습니다.`);
         }
       }
       // 연산자: 잊었다 (= 0)
       else if (line.includes("잊었다")) {
-        const [subj, obj] = parseSubjectAndObject(line);
-        // 문법서 예시 "윤설이 솔빈을 잊었다" (목적어 초기화)
-        if (obj) { // 목적어가 있는 경우 (e.g., "윤설이 솔빈을 잊었다")
-          if (vars[obj] && isValidOperation(subj, obj, "잊었다")) { // 주어와 목적어 유효성 검사 (주어는 '잊었다'에선 연산에 관여하지 않지만, 형식상 필요)
-            vars[obj].value = 0; // 목적어 초기화
-          } else if (!vars[obj]) {
-              throw new Error(`'${obj}' 변수는 정의되지 않았습니다.`);
-          }
-        } else if (subj) { // 목적어 없이 주어만 있는 경우 (e.g., "솔빈이 잊었다" -> 솔빈=0)
-            if (vars[subj]) {
-                vars[subj].value = 0;
-            } else {
-                throw new Error(`'잊었다' 연산 대상을 찾을 수 없습니다.`);
-            }
+        const { subj: rawSubj, obj: rawObj, verb, fullMatch } = parseSubjectAndObject(line);
+        const subj = rawSubj ? rawSubj.replace(/"/g, '') : null;
+        // 잊었다는 '경민이 잊었다' (self) 또는 '경민이 츠카사를 잊었다' (other) 모두 가능
+        const targetVar = rawObj ? rawObj.replace(/"/g, '') : subj; // 목적어가 없으면 주어 자신
+        
+        if (subj && vars[targetVar] !== undefined && isValidOperation(rawSubj, rawObj, "잊었다")) { 
+            vars[targetVar].value = 0;
+            console.log(`    ${subj}이 ${targetVar}를 잊었다: ${targetVar} = ${vars[targetVar].value}`);
         } else {
-            throw new Error(`'잊었다' 연산 대상을 찾을 수 없습니다.`);
+            throw new Error(`'잊었다' 연산 대상을 찾을 수 없거나 정의되지 않은 변수입니다: '${line}'`);
         }
-      }
-      // 기타 (주석, 공백, 흐름 제어 구문은 runYugimunu에서 처리)
-      // 비교 연산자 단독 사용 시 출력 방지 (조건문 내부에서만 평가되도록)
-      else if (line.includes("크다") || line.includes("작다") || (line.includes("이해했다") && line.includes("고 생각했다")) || line.includes("이해하지 못했다")) {
-          // 이 구문들은 evaluateCondition에서 처리되므로, 여기서 특별한 동작 없음.
       }
       else {
           throw new Error(`알 수 없는 구문입니다: '${line}'`);
@@ -413,9 +500,8 @@
       const input = document.getElementById("code").value;
       const lines = input.split("\n");
       const outputArea = document.getElementById("output");
-      let fullOutput = []; // 모든 출력을 모을 배열
+      let fullOutput = [];
 
-      // 변수 초기화
       vars = {};
       for (const charName in initialVars) {
         vars[charName] = { ...initialVars[charName] };
@@ -423,113 +509,174 @@
       loopStack = [];
       conditionStack = [];
 
+      console.clear(); // 이전 콘솔 로그 지우기
+      console.log("--- 유기문어 코드 실행 시작 ---");
+
       let lineIndex = 0;
       while (lineIndex < lines.length) {
         const originalLine = lines[lineIndex];
-        const trimmedLine = originalLine.trim();
+        let trimmedLine = originalLine.trim();
 
-        // 주석 및 빈 줄 건너뛰기
-        if (trimmedLine.startsWith("#") || trimmedLine === "") {
+        console.log(`\n현재 라인: ${lineIndex + 1}, 원본: "${originalLine}", 다듬은 코드: "${trimmedLine}"`);
+        console.log("  변수 상태:", JSON.parse(JSON.stringify(vars)));
+        console.log("  루프 스택:", JSON.parse(JSON.stringify(loopStack)));
+        console.log("  조건 스택:", JSON.parse(JSON.stringify(conditionStack)));
+
+        const commentIndex = trimmedLine.indexOf('#');
+        if (commentIndex !== -1) {
+            trimmedLine = trimmedLine.substring(0, commentIndex).trim();
+            console.log(`  주석 제거 후: "${trimmedLine}"`);
+        }
+
+        if (trimmedLine === "") {
+          console.log("  빈 줄 건너뛰기.");
           lineIndex++;
           continue;
         }
 
         try {
+          // --- 실행 스킵 (Skip Execution) 로직 (가장 먼저 검사) ---
+          // 현재 조건문 스택의 최상단이 false이면 해당 라인 블록 전체를 스킵한다.
+          // 단, '생각을 그만뒀다'나 '생각을 바꿨다'는 조건문의 끝/else를 의미하므로 스킵하지 않고 처리해야 함
+          if (conditionStack.length > 0 && !conditionStack[conditionStack.length - 1]) {
+            if (!(trimmedLine.includes("생각을 그만뒀다") || trimmedLine.includes("생각을 바꿨다"))) {
+                console.log(`  조건 불일치로 스킵: "${trimmedLine}"`);
+                lineIndex++;
+                continue;
+            } else {
+                console.log(`  조건 불일치 스킵 중이지만, 흐름 제어 구문이므로 처리.`);
+            }
+          }
+
           // --- 흐름 제어 (Control Flow) 처리 ---
-          // 조건문 시작 (if)
-          if (trimmedLine.includes("생각했다")) {
+          if (trimmedLine.includes("생각했다") && !trimmedLine.includes("이해했다")) {
+            console.log(`  조건문 시작 (생각했다): "${trimmedLine}"`);
             const result = evaluateCondition(trimmedLine);
             conditionStack.push(result);
+            console.log(`    조건 결과: ${result}, 스택: ${conditionStack}`);
           }
-          // 조건문 else
+          else if (trimmedLine.includes("이해했다") && trimmedLine.endsWith("고 생각했다")) {
+              console.log(`  조건문 시작 (이해했다고 생각했다): "${trimmedLine}"`);
+              const result = evaluateCondition(trimmedLine);
+              conditionStack.push(result);
+              console.log(`    조건 결과: ${result}, 스택: ${conditionStack}`);
+          }
           else if (trimmedLine.includes("생각을 바꿨다")) {
+            console.log(`  조건문 else (생각을 바꿨다)`);
             if (conditionStack.length > 0) {
-              const prevCondition = conditionStack.pop();
-              conditionStack.push(!prevCondition); // 이전 조건의 반대 상태로 변경
+              const prevConditionResult = conditionStack.pop();
+              conditionStack.push(!prevConditionResult);
+              console.log(`    조건 변경: 이전 ${prevConditionResult} -> 현재 ${!prevConditionResult}, 스택: ${conditionStack}`);
             } else {
               throw new Error("경민은 시작되지 않은 생각을 바꿨다!");
             }
           }
-          // 조건문 종료 (endif)
           else if (trimmedLine.includes("생각을 그만뒀다")) {
+            console.log(`  조건문 종료 (생각을 그만뒀다)`);
             if (conditionStack.length > 0) {
               conditionStack.pop();
+              console.log(`    스택 팝, 스택: ${conditionStack}`);
             } else {
               throw new Error("경민은 없는 생각을 그만뒀다!");
             }
           }
-          // 루프 시작 (while)
           else if (trimmedLine.includes("루프를 시작했다")) {
-            loopStack.push({ startLine: lineIndex }); // 현재 라인 인덱스를 저장
+            console.log(`  루프 시작: 라인 ${lineIndex}`);
+            loopStack.push({ startLine: lineIndex });
+            console.log(`    루프 스택 푸시, 스택: ${loopStack.map(l => l.startLine)}`);
           }
-          // 루프 종료 (endwhile)
           else if (trimmedLine.includes("루프를 종료했다")) {
+            console.log(`  루프 종료: "${trimmedLine}"`);
             if (loopStack.length > 0) {
               const currentLoop = loopStack[loopStack.length - 1];
-              // 무한 루프처럼 동작하며, '깨뜨렸다'로 종료된다고 가정.
-              // 따라서 조건 없이 시작 라인으로 점프.
-              lineIndex = currentLoop.startLine - 1; // 다음 반복을 위해 -1 (아래 lineIndex++ 때문에)
+              console.log(`    루프 시작 라인으로 점프: ${currentLoop.startLine}`);
+              lineIndex = currentLoop.startLine; // <-- 무한 루프 버그 수정
+              console.log(`    다음 라인 인덱스 설정 (점프 후): ${lineIndex + 1}`);
             } else {
               throw new Error("경민은 시작되지 않은 루프를 종료하려고 했다!");
             }
           }
-          // 루프 건너뛰기 (continue)
           else if (trimmedLine.includes("루프를 건너뛰었다")) {
+            console.log(`  루프 건너뛰기: "${trimmedLine}"`);
             if (loopStack.length > 0) {
-              const currentLoop = loopStack[loopStack.length - 1];
-              lineIndex = currentLoop.startLine - 1; // 루프 시작 지점으로 점프하여 다음 반복 시작
+                let nestedLoopCount = 0;
+                let foundEndOfCurrentLoopLine = -1; // '루프를 종료했다' 라인 인덱스
+                for (let i = lineIndex + 1; i < lines.length; i++) {
+                  const checkLine = lines[i].trim();
+                  const checkLineNoComment = checkLine.indexOf('#') !== -1 ? checkLine.substring(0, checkLine.indexOf('#')).trim() : checkLine.trim();
+                  
+                  if (checkLineNoComment === "루프를 시작했다") {
+                    nestedLoopCount++;
+                  } else if (checkLineNoComment === "루프를 종료했다") {
+                    if (nestedLoopCount === 0) {
+                      foundEndOfCurrentLoopLine = i;
+                      break;
+                    } else {
+                      nestedLoopCount--;
+                    }
+                  }
+                }
+                if (foundEndOfCurrentLoopLine !== -1) {
+                   lineIndex = foundEndOfCurrentLoopLine - 1; // '루프를 종료했다' 바로 전 라인으로 이동. 다음 lineIndex++에서 '루프를 종료했다'가 실행됨
+                   console.log(`    매칭되는 루프 종료 바로 전 라인으로 이동 (건너뛰기): 라인 ${lineIndex + 1}`);
+                } else {
+                   throw new Error("경민은 건너뛸 루프의 끝을 찾을 수 없었다!");
+                }
             } else {
               throw new Error("경민은 시작되지 않은 루프를 건너뛰려고 했다!");
             }
           }
-          // 루프 깨뜨리기 (break)
           else if (trimmedLine.includes("루프를 깨뜨렸다")) {
+            console.log(`  루프 깨뜨리기: "${trimmedLine}"`);
             if (loopStack.length > 0) {
-              loopStack.pop(); // 현재 루프 스택에서 제거
-              // 현재 루프 블록의 끝을 찾아 건너뛰어야 함 (중첩 루프 고려)
+              loopStack.pop(); // 현재 루프를 스택에서 제거
+              console.log(`    루프 스택 팝, 스택: ${loopStack.map(l => l.startLine)}`);
+              
               let nestedLoopCount = 0;
-              let foundEnd = false;
+              let foundEndLine = -1; // 루프 종료 라인의 인덱스 저장
               for (let i = lineIndex + 1; i < lines.length; i++) {
                 const checkLine = lines[i].trim();
-                if (checkLine.includes("루프를 시작했다")) {
+                const checkLineNoComment = checkLine.indexOf('#') !== -1 ? checkLine.substring(0, checkLine.indexOf('#')).trim() : checkLine.trim();
+
+                if (checkLineNoComment === "루프를 시작했다") {
                   nestedLoopCount++;
-                } else if (checkLine.includes("루프를 종료했다")) {
+                } else if (checkLineNoComment === "루프를 종료했다") {
                   if (nestedLoopCount === 0) {
-                    lineIndex = i; // 매칭되는 종료 지점으로 점프
-                    foundEnd = true;
+                    foundEndLine = i; // 매칭되는 종료 지점 라인 인덱스
                     break;
                   } else {
                     nestedLoopCount--;
                   }
                 }
               }
-              if (!foundEnd) { // 매칭되는 루프 종료를 찾지 못하면 스크립트 끝으로 이동
-                 lineIndex = lines.length;
+              if (foundEndLine !== -1) {
+                  lineIndex = foundEndLine; // 루프 종료 라인으로 이동 (다음 lineIndex++에서 루프 밖으로 나감)
+                  console.log(`    루프 종료 지점(${lineIndex + 1})으로 이동. 다음 반복에서 lineIndex++로 루프 다음 줄 실행.`);
+              } else {
+                 throw new Error("경민은 깨뜨릴 루프의 끝을 찾을 수 없었다!");
               }
             } else {
               throw new Error("경민은 시작되지 않은 루프를 깨뜨리려고 했다!");
             }
           }
-          // --- 실행 스킵 (Skip Execution) 로직 ---
-          // 현재 조건문 스택의 최상단이 false이면 해당 라인을 건너뛴다.
-          if (conditionStack.length > 0 && !conditionStack[conditionStack.length - 1]) {
-            lineIndex++;
-            continue;
+          // --- 실제 코드 실행 ---
+          else {
+            console.log(`  일반 코드 실행: "${trimmedLine}"`);
+            const result = parseLine(trimmedLine);
+            if (result) fullOutput.push(result);
           }
 
-          // --- 실제 코드 실행 ---
-          const result = parseLine(trimmedLine);
-          if (result) fullOutput.push(result); // 결과를 배열에 추가
-
         } catch (e) {
-          // 오류 발생 시 '경민은 혼란에 빠졌다' 메시지 출력
-          fullOutput.push(`경민은 혼란에 빠졌다: ${e.message}`); // 오류 메시지도 배열에 추가
-          break; // 오류 발생 시 실행 중단
+          console.error(`\n오류 발생: ${e.message}`, e);
+          fullOutput.push(`경민은 혼란에 빠졌다: ${e.message}`);
+          break;
         }
         lineIndex++;
+        console.log(`  라인 처리 완료, 다음 lineIndex: ${lineIndex + 1}`);
       }
-      // 모든 실행이 끝난 후 한 번에 출력
       outputArea.textContent = fullOutput.join("\n");
+      console.log("--- 유기문어 코드 실행 완료 ---");
+      console.log("최종 변수 상태:", JSON.parse(JSON.stringify(vars)));
     }
   </script>
 </body>
