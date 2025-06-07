@@ -4,6 +4,8 @@
 
 해당 언어는 [여기서](https://shachixu.github.io/yugimunu/) 테스트 가능하며 원작 웹소설은 [여기서](https://novelpia.com/novel/21232) 읽을 수 있습니다.
 
+아직 버그가 많으며 현재 수정 중입니다.
+
 ## 문법
 
 ### 변수
