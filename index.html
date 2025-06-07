@@ -73,10 +73,10 @@
     // 매 실행마다 초기화될 수 있도록 별도로 저장
     const initialVars = {
       "경민": { value: 0, status: "자유" }, // 주인공, 모든 연산 자유
-      "한별": { value: 0, status: "사망" }, // 솔빈과 앙숙
-      "솔빈": { value: 0, status: "사망" }, // 한별과 앙숙
-      "츠카사": { value: 0, status: "생존" }, // 윤설과 앙숙, 메인 히로인
-      "윤설": { value: 0, status: "생존" }  // 츠카사와 앙숙
+      "한별": { value: 0, status: "사망" }, // 솔빈과 적대
+      "솔빈": { value: 0, status: "사망" }, // 한별과 적대
+      "츠카사": { value: 0, status: "생존" }, // 윤설과 적대, 메인 히로인
+      "윤설": { value: 0, status: "생존" }  // 츠카사와 적대
     };
 
     let vars = {}; // 실제 실행에 사용될 변수 객체
@@ -242,10 +242,10 @@
       // obj가 변수 이름일 경우에만 status를 가져옴
       const objStatus = vars[obj] ? vars[obj].status : undefined; 
 
-      // 앙숙 관계에서의 연산 제한
-      // 단, '잊었다'는 앙숙 관계에서도 허용 (초기화 개념)
+      // 적대 관계에서의 연산 제한
+      // 단, '잊었다'는 적대 관계에서도 허용 (초기화 개념)
       if (operationType !== "잊었다" && ((enemies[subj] && enemies[subj].includes(obj)) || (enemies[obj] && enemies[obj].includes(subj)))) {
-        throw new new Error(`${subj}와 ${obj}는 앙숙 관계입니다. 함께 연산을 할 수 없습니다.`);
+        throw new new Error(`${subj}와 ${obj}는 적대 관계입니다. 함께 연산을 할 수 없습니다.`);
       }
 
       // 생존/사망 여부에 따른 연산 제한
@@ -273,7 +273,7 @@
           }
           break;
         case "잊었다": // = 0 (누구나 사용 가능)
-          // 특별한 제약 없음 (앙숙 관계 허용됨)
+          // 특별한 제약 없음 (적대 관계 허용됨)
           break;
       }
       return true;
